@@ -17,9 +17,9 @@ function loadConfig() {
 
 const nix = {
   name: "notification",
-  version: "2.0.1",
+  version: "2.0.2",
   aliases: ["notify", "noti"],
-  description: "Broadcast Uchiha synchronisé avec config.json (Sans Crash)",
+  description: "Broadcast Uchiha global via base SQLite synchronisée",
   author: "Camille 🤍",
   editor: "Camille Uchiha 🍓",
   prefix: false,
@@ -58,30 +58,37 @@ async function onStart({ bot, args, message, msg, chatId, userId }) {
   if (!textMessage) return sendReply("❌ Tu dois entrer un message pour tes sujets, Camille.");
 
   let allThreadID = [];
+  
+  // Récupération globale de TOUS les fils enregistrés sans filtres restrictifs
   if (global.threadsData && typeof global.threadsData.getAll === "function") {
     const list = await global.threadsData.getAll();
-    allThreadID = list.filter(t => t.isGroup || String(t.threadID).startsWith("-"));
-  } else {
-    allThreadID = [{ threadID: chatId, name: currentMsg?.chat?.title || "Ce Chat" }];
+    if (list && list.length > 0) {
+      // On prend tous les threads de la base SQLite. S'ils ont un threadName ou threadID valide, on fonce.
+      allThreadID = list.map(t => ({
+        threadID: String(t.threadID || t.id),
+        name: t.threadName || t.name || "Groupe Enconnu"
+      }));
+    }
   }
 
-  await sendReply(`🌀 Activation du Sharingan sur ${allThreadID.length} groupes...`);
+  // Si la base de données est vide ou inaccessible, on utilise au moins le chat actuel
+  if (!allThreadID.length) {
+    allThreadID = [{ threadID: String(chatId), name: currentMsg?.chat?.title || "Ce Chat" }];
+  }
 
-  // Gestion ultra-sécurisée des Pièces Jointes (Protection contre les crashs)
+  await sendReply(`🌀 Activation du Sharingan sur ${allThreadID.length} cibles enregistrées...`);
+
   let photoToSend = null;
   let videoToSend = null;
   const replyToMessage = currentMsg?.reply_to_message;
 
-  // 1. Analyse du message direct
   if (currentMsg?.photo && currentMsg.photo.length > 0) {
     photoToSend = currentMsg.photo[currentMsg.photo.length - 1]?.file_id;
   } else if (currentMsg?.video?.file_id) {
     videoToSend = currentMsg.video.file_id;
   } else if (currentMsg?.animation?.file_id) { 
-    // Prise en charge des GIFs (souvent appelés animation dans Telegram)
     videoToSend = currentMsg.animation.file_id;
   } 
-  // 2. Analyse du message répondu (si aucun média sur le message direct)
   else if (replyToMessage) {
     if (replyToMessage?.photo && replyToMessage.photo.length > 0) {
       photoToSend = replyToMessage.photo[replyToMessage.photo.length - 1]?.file_id;
@@ -93,11 +100,14 @@ async function onStart({ bot, args, message, msg, chatId, userId }) {
   }
 
   let sendSuccess = 0;
+  let sendError = 0;
+
   for (const thread of allThreadID) {
     const tid = thread.threadID;
-    let threadName = thread.name || "Groupe Inconnu";
+    let threadName = thread.name;
     const time = moment.tz("Africa/Abidjan").format("HH:mm");
 
+    // Évite d'envoyer deux fois sur le chat de commande si présent dans la boucle
     try {
       const chatDetails = await bot.getChat(tid);
       threadName = chatDetails.title || threadName;
@@ -136,10 +146,12 @@ async function onStart({ bot, args, message, msg, chatId, userId }) {
         global.telegramNotificationMemory.set(String(sentMsg.message_id) + "_" + String(tid), { groupName: threadName, threadID: tid });
       }
       await new Promise(resolve => setTimeout(resolve, DELAY_PER_GROUP));
-    } catch (e) {}
+    } catch (e) {
+      sendError++;
+    }
   }
 
-  return sendReply(`✅ Transmis avec succès à ${sendSuccess} groupes.`);
+  return sendReply(`✅ Transmis avec succès à ${sendSuccess} groupes.${sendError > 0 ? `\n❌ Échec sur ${sendError} groupes.` : ""}`);
 }
 
 async function onChat({ bot, message, msg }) {
