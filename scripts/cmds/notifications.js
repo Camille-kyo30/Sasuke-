@@ -7,15 +7,19 @@ const configPath = path.join(__dirname, "..", "..", "config.json");
 function loadConfig() {
     try {
         const configData = fs.readFileSync(configPath, "utf-8");
-        return JSON.parse(configData);
-    } catch (e) { return { admin: ["8984714130"] }; }
+        const config = JSON.parse(configData);
+        if (!config.admin) config.admin = [];
+        return config;
+    } catch (error) {
+        return { admin: ["8984714130"] };
+    }
 }
 
 const nix = {
   name: "notification",
-  version: "2.1.0",
+  version: "2.0.1",
   aliases: ["notify", "noti"],
-  description: "Broadcast global adapté pour l'architecture GoatBot Telegram",
+  description: "Broadcast Uchiha synchronisé avec config.json (Sans Crash)",
   author: "Camille 🤍",
   editor: "Camille Uchiha 🍓",
   prefix: false,
@@ -25,73 +29,79 @@ const nix = {
   guide: "{pn} <message>"
 };
 
-if (!global.telegramNotificationMemory) global.telegramNotificationMemory = new Map();
+if (!global.telegramNotificationMemory) {
+  global.telegramNotificationMemory = new Map();
+}
 
-const DELAY_PER_GROUP = 300;
+const DELAY_PER_GROUP = 250;
 
 async function onStart({ bot, args, message, msg, chatId, userId }) {
   const currentMsg = message || msg;
-  const senderID = String(userId || currentMsg?.from?.id || "").trim();
-  const config = loadConfig();
-  const symbol = config.symbols || "●";
   
-  if (!config.admin.includes(senderID) && senderID !== "8984714130") {
-    return bot.sendMessage(chatId, "⚠️ Action réservée aux administrateurs.");
+  const senderIDRaw = userId || currentMsg?.from?.id;
+  const senderID = senderIDRaw ? String(senderIDRaw).trim() : "";
+
+  const config = loadConfig();
+  const authorizedAdmins = config.admin ? config.admin.map(String) : [];
+
+  const sendReply = async (text) => {
+    try {
+      return await bot.sendMessage(chatId, text, { parse_mode: "HTML" });
+    } catch (e) { console.error("[noti] Erreur d'envoi :", e.message); }
+  };
+
+  if (!authorizedAdmins.includes(senderID) && senderID !== "8984714130") {
+    return sendReply(`⚠️ Action réservée aux administrateurs.\n🕵️‍♂️ <b>ID détecté par le bot :</b> <code>${senderID || "Introuvable"}</code>`);
   }
 
   const textMessage = args.join(" ").trim();
-  if (!textMessage) return bot.sendMessage(chatId, "❌ Tu devez entrer un message pour tes sujets, Camille.");
+  if (!textMessage) return sendReply("❌ Tu dois entrer un message pour tes sujets, Camille.");
 
-  let rawThreads = [];
-
-  // 1. Tentative via le cache global standard de GoatBot
-  if (global.data && Array.isArray(global.data.allThreadData)) {
-    rawThreads = global.data.allThreadData;
-  } 
-  // 2. Alternative : si stocké dans global.db.allThreadData
-  else if (global.db && Array.isArray(global.db.allThreadData)) {
-    rawThreads = global.db.allThreadData;
-  }
-  // 3. Secours : Si getAll existe finalement sous un autre format
-  else if (global.threadsData && typeof global.threadsData.getAll === "function") {
-    rawThreads = await global.threadsData.getAll();
-  }
-
-  // Filtrage et uniformisation des IDs de groupes
   let allThreadID = [];
-  if (Array.isArray(rawThreads) && rawThreads.length > 0) {
-    allThreadID = rawThreads.map(t => {
-      const id = String(t.threadID || t.id || t.tid || "");
-      const name = t.threadName || t.name || "Groupe Inconnu";
-      return { threadID: id, name: name };
-    }).filter(t => t.threadID !== "" && (t.threadID.startsWith("-") || t.threadID.length > 8)); 
-    // Filtre pour cibler uniquement les structures de groupes/supergroupes sur Telegram
+  if (global.threadsData && typeof global.threadsData.getAll === "function") {
+    const list = await global.threadsData.getAll();
+    allThreadID = list.filter(t => t.isGroup || String(t.threadID).startsWith("-"));
+  } else {
+    allThreadID = [{ threadID: chatId, name: currentMsg?.chat?.title || "Ce Chat" }];
   }
 
-  // Si vraiment aucun groupe n'est trouvé dans le cache global, on force le groupe actuel
-  if (allThreadID.length === 0) {
-    allThreadID = [{ threadID: String(chatId), name: currentMsg?.chat?.title || "Ce Chat" }];
-  }
+  await sendReply(`🌀 Activation du Sharingan sur ${allThreadID.length} groupes...`);
 
-  await bot.sendMessage(chatId, `🌀 Activation du Sharingan sur ${allThreadID.length} groupes détectés...`);
-
-  let photoToSend = currentMsg?.photo?.length ? currentMsg.photo[currentMsg.photo.length - 1].file_id : null;
-  let videoToSend = currentMsg?.video?.file_id || currentMsg?.animation?.file_id;
-
+  // Gestion ultra-sécurisée des Pièces Jointes (Protection contre les crashs)
+  let photoToSend = null;
+  let videoToSend = null;
   const replyToMessage = currentMsg?.reply_to_message;
-  if (!photoToSend && !videoToSend && replyToMessage) {
-    if (replyToMessage?.photo?.length) photoToSend = replyToMessage.photo[replyToMessage.photo.length - 1].file_id;
-    else if (replyToMessage?.video?.file_id) videoToSend = replyToMessage.video.file_id;
-    else if (replyToMessage?.animation?.file_id) videoToSend = replyToMessage.animation.file_id;
+
+  // 1. Analyse du message direct
+  if (currentMsg?.photo && currentMsg.photo.length > 0) {
+    photoToSend = currentMsg.photo[currentMsg.photo.length - 1]?.file_id;
+  } else if (currentMsg?.video?.file_id) {
+    videoToSend = currentMsg.video.file_id;
+  } else if (currentMsg?.animation?.file_id) { 
+    // Prise en charge des GIFs (souvent appelés animation dans Telegram)
+    videoToSend = currentMsg.animation.file_id;
+  } 
+  // 2. Analyse du message répondu (si aucun média sur le message direct)
+  else if (replyToMessage) {
+    if (replyToMessage?.photo && replyToMessage.photo.length > 0) {
+      photoToSend = replyToMessage.photo[replyToMessage.photo.length - 1]?.file_id;
+    } else if (replyToMessage?.video?.file_id) {
+      videoToSend = replyToMessage.video.file_id;
+    } else if (replyToMessage?.animation?.file_id) {
+      videoToSend = replyToMessage.animation.file_id;
+    }
   }
 
   let sendSuccess = 0;
-  let sendError = 0;
-
   for (const thread of allThreadID) {
     const tid = thread.threadID;
-    let threadName = thread.name;
+    let threadName = thread.name || "Groupe Inconnu";
     const time = moment.tz("Africa/Abidjan").format("HH:mm");
+
+    try {
+      const chatDetails = await bot.getChat(tid);
+      threadName = chatDetails.title || threadName;
+    } catch {}
 
     const styledMessage = 
 `╔═══════ 🍎 ═══════╗
@@ -126,12 +136,10 @@ async function onStart({ bot, args, message, msg, chatId, userId }) {
         global.telegramNotificationMemory.set(String(sentMsg.message_id) + "_" + String(tid), { groupName: threadName, threadID: tid });
       }
       await new Promise(resolve => setTimeout(resolve, DELAY_PER_GROUP));
-    } catch (e) {
-      sendError++;
-    }
+    } catch (e) {}
   }
 
-  return bot.sendMessage(chatId, `✅ Transmis avec succès à ${sendSuccess} groupes.${sendError > 0 ? `\n❌ Échec (Bot banni/bloqué) sur ${sendError} groupes.` : ""}`, { parse_mode: "HTML" });
+  return sendReply(`✅ Transmis avec succès à ${sendSuccess} groupes.`);
 }
 
 async function onChat({ bot, message, msg }) {
