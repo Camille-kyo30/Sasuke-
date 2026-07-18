@@ -1,18 +1,18 @@
 {
   "devMode": true,
   "timeZone": "Asia/Dhaka",
-  "prefix": "/",
+  "prefix": "¥",
   "symbols": "●",
   "owner": {
-    "name": "CHRISTUS",
-    "facebook": "FACEBOOK_ID",
-    "username": "VOID BOT"
+    "name": "Kyo_soma",
+    "facebook": "https://www.facebook.com/profile.php?id=61577875842514",
+    "username": "Sasuke uchiha"
   },
   "admin": [
-    "7808139364"
+    "8984714130"
   ],
   "vip": [
-    "7808139364"
+    "8984714130"
   ],
   "loadCmds": true,
   "loadEvents": true,
