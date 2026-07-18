@@ -3,7 +3,7 @@ const path = require("path");
 
 const nix = {
   name: "file",
-  version: "1.2",
+  version: "1.3",
   aliases: [],
   description: "Voir le code source d'une commande",
   author: "NeoKEX",
@@ -20,24 +20,24 @@ async function onStart({ bot, args, message, msg, usages }) {
   }
 
   const commandName = args[0].toLowerCase();
-  
-  // Note : Adapte 'global.GoatBot.commands' selon la structure de ton bot Telegram
-  const allCommands = global.GoatBot.commands; 
+  let actualCommandName = commandName;
 
-  let command = allCommands.get(commandName);
-  if (!command) {
-    const cmd = [...allCommands.values()].find((c) =>
-      (c.config.aliases || []).includes(commandName)
-    );
-    command = cmd;
+  // Si global.GoatBot est disponible, on l'utilise pour vérifier les alias
+  if (global.GoatBot && global.GoatBot.commands) {
+    const allCommands = global.GoatBot.commands;
+    let command = allCommands.get(commandName);
+    if (!command) {
+      const cmd = [...allCommands.values()].find((c) =>
+        (c.config?.aliases || c.nix?.aliases || []).includes(commandName)
+      );
+      command = cmd;
+    }
+    if (command) {
+      actualCommandName = command.config?.name || command.nix?.name || commandName;
+    }
   }
 
-  if (!command) {
-    return msg.reply("❌ Commande non trouvée.");
-  }
-
-  const actualCommandName = command.config.name;
-
+  // Sécurité anti-traversée de chemin
   if (!/^[a-zA-Z0-9_-]+$/.test(actualCommandName)) {
     return msg.reply("❌ Nom de commande invalide.");
   }
@@ -51,7 +51,7 @@ async function onStart({ bot, args, message, msg, usages }) {
 
   try {
     if (!fs.existsSync(filePath)) {
-      return msg.reply("❌ Fichier non trouvé.");
+      return msg.reply(`❌ Fichier non trouvé : ${actualCommandName}.js`);
     }
 
     const content = fs.readFileSync(filePath, "utf-8");
