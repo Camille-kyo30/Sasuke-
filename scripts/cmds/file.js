@@ -3,7 +3,7 @@ const path = require("path");
 
 const nix = {
   name: "file",
-  version: "1.3",
+  version: "1.4",
   aliases: [],
   description: "Voir le code source d'une commande",
   author: "NeoKEX",
@@ -15,14 +15,31 @@ const nix = {
 };
 
 async function onStart({ bot, args, message, msg, usages }) {
+  // Fonction interne de secours pour envoyer un message peu importe la structure du framework
+  const sendReply = async (text) => {
+    try {
+      if (message && typeof message.reply === "function") {
+        return await message.reply(text);
+      } else if (bot && typeof bot.sendMessage === "function") {
+        const chatId = message?.chat?.id || msg?.chat?.id || event?.chat?.id;
+        if (chatId) return await bot.sendMessage(chatId, text);
+      } else if (msg && typeof msg.reply === "function") {
+        return await msg.reply(text);
+      }
+      console.log(`[file] Impossible de répondre via le framework, texte : ${text}`);
+    } catch (e) {
+      console.error("[file] Échec de l'envoi du message:", e.message);
+    }
+  };
+
   if (!args.length) {
-    return msg.reply("❌ Usage : /file <nom_de_la_commande>");
+    return sendReply("❌ Usage : /file <nom_de_la_commande>");
   }
 
   const commandName = args[0].toLowerCase();
   let actualCommandName = commandName;
 
-  // Si global.GoatBot est disponible, on l'utilise pour vérifier les alias
+  // Gestion des alias si global.GoatBot existe
   if (global.GoatBot && global.GoatBot.commands) {
     const allCommands = global.GoatBot.commands;
     let command = allCommands.get(commandName);
@@ -39,31 +56,31 @@ async function onStart({ bot, args, message, msg, usages }) {
 
   // Sécurité anti-traversée de chemin
   if (!/^[a-zA-Z0-9_-]+$/.test(actualCommandName)) {
-    return msg.reply("❌ Nom de commande invalide.");
+    return sendReply("❌ Nom de commande invalide.");
   }
 
   const allowedDir = path.resolve(__dirname);
   const filePath = path.resolve(__dirname, `${actualCommandName}.js`);
 
   if (!filePath.startsWith(allowedDir)) {
-    return msg.reply("❌ Accès refusé : Tentative de traversal de chemin détectée.");
+    return sendReply("❌ Accès refusé : Tentative de traversal de chemin détectée.");
   }
 
   try {
     if (!fs.existsSync(filePath)) {
-      return msg.reply(`❌ Fichier non trouvé : ${actualCommandName}.js`);
+      return sendReply(`❌ Fichier non trouvé : ${actualCommandName}.js`);
     }
 
     const content = fs.readFileSync(filePath, "utf-8");
 
     if (content.length > 4000) {
-      return msg.reply(`${content.substring(0, 3997)}...`);
+      return sendReply(`${content.substring(0, 3997)}...`);
     }
 
-    return msg.reply(content);
+    return sendReply(content);
 
   } catch (err) {
-    return msg.reply(`❌ Erreur : ${err.message}`);
+    return sendReply(`❌ Erreur : ${err.message}`);
   }
 }
 
