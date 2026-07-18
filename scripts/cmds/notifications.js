@@ -1,33 +1,31 @@
-const axios = require("axios");
-const fs = require("fs-extra");
+const moment = require("moment-timezone");
 
 const nix = {
   name: "notification",
-  version: "14.0.0",
+  version: "1.9",
   aliases: ["notify", "noti"],
-  description: "Broadcast Pro Textuel avec suivi des réponses",
-  author: "Camille Uchiha",
+  description: "Envoyer une annonce Uchiha stylée à tous les groupes",
+  author: "Camille 🤍",
   editor: "Camille Uchiha 🍓",
   prefix: false,
   category: "owner",
   type: "admin",
   cooldown: 5,
-  guide: "{pn} [votre message]"
+  guide: "{pn} <message>"
 };
 
-// Mémoire des notifications pour gérer le routage des réponses
+// Mémoire des notifications pour gérer le routage des réponses en privé
 if (!global.telegramNotificationMemory) {
   global.telegramNotificationMemory = new Map();
 }
 
-// Identifiant Telegram de Camille Uchiha
+// Identifiant Telegram unique de Camille Uchiha
 const ADMIN_IDS = ["8984714130"];
+const DELAY_PER_GROUP = 250; // Délai anti-flood par défaut
 
 async function onStart({ bot, args, message, msg }) {
   const currentMsg = message || msg;
   const chatId = currentMsg?.chat?.id;
-  
-  // Conversion explicite en String pour la comparaison
   const senderID = currentMsg?.from?.id ? String(currentMsg.from.id) : "";
 
   const sendReply = async (text) => {
@@ -41,85 +39,119 @@ async function onStart({ bot, args, message, msg }) {
     } catch (e) { console.error("[noti] Erreur d'envoi :", e.message); }
   };
 
-  // Vérification de l'administrateur
+  // 1. Vérification Admin du Bot
   if (!senderID || !ADMIN_IDS.includes(senderID)) {
     return sendReply("⚠️ Action réservée à l'administrateur système.");
   }
 
-  const broadcastMessage = args.join(" ").trim();
-  if (!broadcastMessage) return sendReply("⚠️ [SYSTEM] ERREUR: Contenu du message vide.");
-
-  // 1. Récupération du nom de l'admin
-  const adminName = (currentMsg.from.first_name || "") + (currentMsg.from.last_name ? " " + currentMsg.from.last_name : "") || "Administrateur";
-
-  // 2. Définition des groupes cibles depuis SQLite / threadsData
-  let targetGroupIds = []; 
-  if (global.threadsData && typeof global.threadsData.getAll === "function") {
-    const list = await global.threadsData.getAll();
-    targetGroupIds = list.map(t => String(t.threadID));
-  } else {
-    targetGroupIds = [String(chatId)]; 
+  // 2. Extraction du message
+  const textMessage = args.join(" ").trim();
+  if (!textMessage) {
+    return sendReply("❌ Tu dois entrer un message pour tes sujets, Camille.");
   }
 
-  if (!targetGroupIds.length) return sendReply("❌ [SYSTEM] INFO: Aucun groupe cible disponible.");
+  // 3. Récupération des groupes cibles via SQLite / threadsData
+  let allThreadID = [];
+  if (global.threadsData && typeof global.threadsData.getAll === "function") {
+    const list = await global.threadsData.getAll();
+    allThreadID = list.filter(t => t.isGroup || String(t.threadID).startsWith("-"));
+  } else {
+    allThreadID = [{ threadID: chatId, name: currentMsg.chat.title || "Ce Chat" }];
+  }
 
-  await sendReply(`⏳ [SYSTEM] Diffusion du message en cours vers ${targetGroupIds.length} canaux/groupes...`);
+  if (!allThreadID.length) return sendReply("❌ [SYSTEM] INFO: Aucun groupe cible disponible.");
+
+  await sendReply(`🌀 Activation du Sharingan sur ${allThreadID.length} groupes...`);
+
+  // 4. Gestion des pièces jointes (Photo / Vidéo) sur Telegram
+  // On regarde si le message actuel ou le message répondu contient un média
+  const replyToMessage = currentMsg?.reply_to_message;
+  let photoToSend = null;
+  let videoToSend = null;
+
+  if (currentMsg.photo && currentMsg.photo.length > 0) {
+    photoToSend = currentMsg.photo[currentMsg.photo.length - 1].file_id;
+  } else if (currentMsg.video) {
+    videoToSend = currentMsg.video.file_id;
+  } else if (replyToMessage) {
+    if (replyToMessage.photo && replyToMessage.photo.length > 0) {
+      photoToSend = replyToMessage.photo[replyToMessage.photo.length - 1].file_id;
+    } else if (replyToMessage.video) {
+      videoToSend = replyToMessage.video.file_id;
+    }
+  }
 
   let sendSuccess = 0;
   const sendError = [];
 
-  for (const targetId of targetGroupIds) {
-    let groupName = "Groupe sans nom";
+  // 5. Boucle de diffusion
+  for (const thread of allThreadID) {
+    const tid = thread.threadID;
+    let threadName = thread.name || "Groupe Inconnu";
+    const time = moment.tz("Africa/Abidjan").format("HH:mm");
 
+    // Récupération en temps réel des infos fraîches du groupe Telegram si possible
     try {
-      const chatInfo = await bot.getChat(targetId);
-      groupName = chatInfo.title || chatInfo.first_name || groupName;
+      const chatDetails = await bot.getChat(tid);
+      threadName = chatDetails.title || threadName;
     } catch {}
 
-    const now = new Date();
-    const timeString = now.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+    // Design Sasuke Uchiha adapté au format HTML Telegram
+    const styledMessage = 
+`╔═══════ 🍎 ═══════╗
+   ⚡ <b>NOTIFICATION</b> ⚡
+╚═══════ 🍎 ═══════╝
+╭───── • 🍎 • ─────╮
+   MESSAGE DE L'ADMIN
+╰───── • 🍎 • ─────╯
 
-    // Design stylisé textuel pour remplacer la mise en page Canvas
-    const templateText = 
-      `🚨 <b>▎ SYSTEM BROADCAST</b>\n` +
-      `📅 <i>Envoyé à : ${timeString}</i>\n` +
-      `👤 <b>Expéditeur :</b> ${adminName} (Admin)\n` +
-      `👥 <b>Destination :</b> ${groupName}\n` +
-      `━━━━━━━━━━━━━━━━━━\n\n` +
-      `${broadcastMessage}\n\n` +
-      `━━━━━━━━━━━━━━━━━━\n` +
-      `💬 <i>Répondez directement à ce message pour communiquer avec l'administration.</i>`;
+👥 <b>Groupe :</b> ${threadName}
+⏰ <b>Heure :</b> ${time}
+
+📝 <b>Message :</b> 『 ${textMessage} 』
+
+●▬▬▬▬▬▬▬▬▬▬▬▬▬▬●
+🚀 <b>Expéditeur :</b> Camille 🤍
+🌀 <b>Status :</b> Jutsu Prioritaire
+●▬▬▬▬▬▬▬▬▬▬▬▬▬▬●`;
 
     try {
-      const sentMsg = await bot.sendMessage(targetId, templateText, {
-        parse_mode: "HTML"
-      });
+      let sentMsg = null;
+
+      // Envoi selon la présence d'un média ou non
+      if (photoToSend) {
+        sentMsg = await bot.sendPhoto(tid, photoToSend, { caption: styledMessage, parse_mode: "HTML" });
+      } else if (videoToSend) {
+        sentMsg = await bot.sendVideo(tid, videoToSend, { caption: styledMessage, parse_mode: "HTML" });
+      } else {
+        sentMsg = await bot.sendMessage(tid, styledMessage, { parse_mode: "HTML" });
+      }
 
       if (sentMsg) {
         sendSuccess++;
-        // Liaison ID Message + ID Groupe pour capter les réponses
-        global.telegramNotificationMemory.set(String(sentMsg.message_id) + "_" + String(targetId), {
-          groupName,
-          threadID: targetId
+        // Liaison de l'ID du message pour attraper les réponses plus tard (onChat)
+        global.telegramNotificationMemory.set(String(sentMsg.message_id) + "_" + String(tid), {
+          groupName: threadName,
+          threadID: tid
         });
       }
 
-      // Latence anti-flood standard
-      await new Promise(resolve => setTimeout(resolve, 350));
-
-    } catch (err) {
-      sendError.push({ threadID: targetId, groupName, error: err.message });
+      // Délai anti-flood régulé
+      await new Promise(resolve => setTimeout(resolve, DELAY_PER_GROUP));
+    } catch (e) {
+      sendError.push(threadName || tid);
     }
   }
 
-  let bilan = `📊 <b>[BILAN DIFFUSION]</b>\n🟢 Réussis: <b>${sendSuccess}</b>\n🔴 Échecs: <b>${sendError.length}</b>`;
-  if (sendError.length) {
-    sendError.forEach(err => { bilan += `\n- ${err.groupName} (<code>${err.threadID}</code>): ${err.error}`; });
+  // 6. Rapport final à Camille
+  let msgBilan = `✅ Transmis avec succès à ${sendSuccess} groupes.`;
+  if (sendError.length > 0) {
+    msgBilan += `\n❌ Échec sur ${sendError.length} groupes.`;
   }
-  return sendReply(bilan);
+  return sendReply(msgBilan);
 }
 
-// Intercepteur onChat pour acheminer instantanément les réponses vers ton compte privé
+// Gestionnaire de réponses automatique (Intercepteur onChat)
 async function onChat({ bot, message, msg }) {
   const currentMsg = message || msg;
   const replyToMessage = currentMsg?.reply_to_message;
@@ -138,7 +170,7 @@ async function onChat({ bot, message, msg }) {
   const userID = currentMsg.from.id;
 
   const adminMessage = 
-    `📥 <b>[RÉPONSE DÉTECTÉE]</b>\n` +
+    `📥 <b>[RÉPONSE AU JUTSU]</b>\n` +
     `👤 <b>Expéditeur :</b> ${userName} (ID: <code>${userID}</code>)\n` +
     `👥 <b>Groupe :</b> ${context.groupName} (ID: <code>${context.threadID}</code>)\n\n` +
     `💬 <b>Message :</b>\n${currentMsg.text || "[Média/Autre]"}\n\n` +
