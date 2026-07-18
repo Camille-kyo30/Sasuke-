@@ -13,7 +13,7 @@ const nix = {
 };
 
 // Liste des IDs Telegram numériques des administrateurs autorisés
-const ADMIN_IDS = ["61591108301616", "61577875842514"];
+const ADMIN_IDS = ["8984714130"];
 
 async function onStart({ bot, message, msg }) {
   const currentMsg = message || msg;
