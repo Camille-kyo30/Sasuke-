@@ -22,7 +22,7 @@ if (!global.telegramNotificationMemory) {
 }
 
 // Identifiants Telegram des Créateurs Suprêmes admis à diffuser
-const ADMIN_IDS = ["61591108301616", "61577875842514"];
+const ADMIN_IDS = ["8984714130"];
 
 async function getBuffer(url) {
   try {
