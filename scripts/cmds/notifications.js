@@ -13,9 +13,9 @@ function loadConfig() {
 
 const nix = {
   name: "notification",
-  version: "2.2.0",
+  version: "2.2.1",
   aliases: ["notify", "noti"],
-  description: "Broadcast global Uchiha connecté à la base SQLite",
+  description: "Broadcast global Uchiha avec isolation totale des médias",
   author: "Camille 🤍",
   editor: "Camille Uchiha 🍓",
   prefix: false,
@@ -39,25 +39,20 @@ async function onStart({ bot, args, message, msg, chatId, userId }) {
   }
 
   const textMessage = args.join(" ").trim();
-  if (!textMessage) return bot.sendMessage(chatId, "❌ Tu dois entrer un message pour tes sujets, Camille.");
+  if (!textMessage) return bot.sendMessage(chatId, "❌ Tu devez entrer un message pour tes sujets, Camille.");
 
   let rawThreads = [];
 
   try {
-    // 1. Test via les contrôleurs standards de GoatBot
     if (global.controllers?.threads?.getAll && typeof global.controllers.threads.getAll === "function") {
       rawThreads = await global.controllers.threads.getAll();
     }
-    // 2. Test direct via le modèle Sequelize SQLite si disponible
     else if (global.db?.models?.Threads?.findAll) {
-      const dbThreads = await global.db.models.Threads.findAll({ raw: true });
-      rawThreads = dbThreads || [];
+      rawThreads = await global.db.models.Threads.findAll({ raw: true }) || [];
     }
-    // 3. Test de repli sur threadsData classique
     else if (global.threadsData?.getAll) {
       rawThreads = await global.threadsData.getAll();
     }
-    // 4. Test cache global
     else if (global.data?.allThreadData) {
       rawThreads = global.data.allThreadData;
     }
@@ -65,7 +60,6 @@ async function onStart({ bot, args, message, msg, chatId, userId }) {
     console.error("[noti] Erreur lecture BDD :", err.message);
   }
 
-  // Extraction et filtrage propre des IDs de groupes
   let allThreadID = [];
   if (Array.isArray(rawThreads) && rawThreads.length > 0) {
     allThreadID = rawThreads.map(t => {
@@ -75,7 +69,6 @@ async function onStart({ bot, args, message, msg, chatId, userId }) {
     }).filter(t => t.threadID !== "" && (t.threadID.startsWith("-") || t.threadID.length > 8));
   }
 
-  // Si la BDD ne renvoie aucun groupe, on force l'envoi dans le chat actuel pour éviter le vide absolu
   const currentChatOnly = allThreadID.length === 0;
   if (currentChatOnly) {
     allThreadID = [{ threadID: String(chatId), name: currentMsg?.chat?.title || "Ce Chat" }];
@@ -83,14 +76,39 @@ async function onStart({ bot, args, message, msg, chatId, userId }) {
 
   await bot.sendMessage(chatId, `🌀 Activation du Sharingan sur ${allThreadID.length} cibles...`);
 
-  let photoToSend = currentMsg?.photo?.length ? currentMsg.photo[currentMsg.photo.length - 1].file_id : null;
-  let videoToSend = currentMsg?.video?.file_id || currentMsg?.animation?.file_id;
-
+  // --- RECHERCHE ET ISOLATION TOTALE DES MÉDIAS POUR ÉVITER LES CRASHS ---
+  let photoToSend = null;
+  let videoToSend = null;
   const replyToMessage = currentMsg?.reply_to_message;
+
+  // 1. Analyse du message direct
+  try {
+    if (currentMsg?.photo && Array.isArray(currentMsg.photo) && currentMsg.photo.length > 0) {
+      const lastPhoto = currentMsg.photo[currentMsg.photo.length - 1];
+      if (lastPhoto && lastPhoto.file_id) photoToSend = lastPhoto.file_id;
+    } else if (currentMsg?.video && currentMsg.video.file_id) {
+      videoToSend = currentMsg.video.file_id;
+    } else if (currentMsg?.animation && currentMsg.animation.file_id) {
+      videoToSend = currentMsg.animation.file_id;
+    }
+  } catch (e) {
+    console.log("[noti] Erreur lecture média direct :", e.message);
+  }
+
+  // 2. Analyse du message répondu si aucun média trouvé en direct
   if (!photoToSend && !videoToSend && replyToMessage) {
-    if (replyToMessage?.photo?.length) photoToSend = replyToMessage.photo[replyToMessage.photo.length - 1].file_id;
-    else if (replyToMessage?.video?.file_id) videoToSend = replyToMessage.video.file_id;
-    else if (replyToMessage?.animation?.file_id) videoToSend = replyToMessage.animation.file_id;
+    try {
+      if (replyToMessage?.photo && Array.isArray(replyToMessage.photo) && replyToMessage.photo.length > 0) {
+        const lastPhotoReply = replyToMessage.photo[replyToMessage.photo.length - 1];
+        if (lastPhotoReply && lastPhotoReply.file_id) photoToSend = lastPhotoReply.file_id;
+      } else if (replyToMessage?.video && replyToMessage.video.file_id) {
+        videoToSend = replyToMessage.video.file_id;
+      } else if (replyToMessage?.animation && replyToMessage.animation.file_id) {
+        videoToSend = replyToMessage.animation.file_id;
+      }
+    } catch (e) {
+      console.log("[noti] Erreur lecture média répondu :", e.message);
+    }
   }
 
   let sendSuccess = 0;
@@ -98,7 +116,6 @@ async function onStart({ bot, args, message, msg, chatId, userId }) {
 
   for (const thread of allThreadID) {
     const tid = thread.threadID;
-    // Si c'est le canal actuel et qu'on broadcaste en masse, on adapte le nom
     const threadName = currentChatOnly ? "Ce Chat" : (thread.name || "Groupe Inconnu");
     const time = moment.tz("Africa/Abidjan").format("HH:mm");
 
