@@ -2,23 +2,24 @@ const fs = require("fs");
 const path = require("path");
 const moment = require("moment-timezone");
 
-// Liaison directe avec le fichier config.json de ton bot
 const configPath = path.join(__dirname, "..", "..", "config.json");
 
 function loadConfig() {
     try {
         const configData = fs.readFileSync(configPath, "utf-8");
-        return JSON.parse(configData);
+        const config = JSON.parse(configData);
+        if (!config.admin) config.admin = [];
+        return config;
     } catch (error) {
-        return { admin: ["8984714130"] }; // Sécurité Uchiha
+        return { admin: ["8984714130"] };
     }
 }
 
 const nix = {
   name: "notification",
-  version: "1.9",
+  version: "2.0.0",
   aliases: ["notify", "noti"],
-  description: "Broadcast Uchiha lié aux admins de config.json",
+  description: "Broadcast Uchiha synchronisé avec config.json",
   author: "Camille 🤍",
   editor: "Camille Uchiha 🍓",
   prefix: false,
@@ -34,25 +35,25 @@ if (!global.telegramNotificationMemory) {
 
 const DELAY_PER_GROUP = 250;
 
-async function onStart({ bot, args, message, msg }) {
+async function onStart({ bot, args, message, msg, chatId, userId }) {
   const currentMsg = message || msg;
-  const chatId = currentMsg?.chat?.id;
-  const senderID = currentMsg?.from?.id ? String(currentMsg.from.id) : "";
+  
+  // Utilisation de l'userId destructuré ou repli sur l'objet message
+  const senderIDRaw = userId || currentMsg?.from?.id;
+  const senderID = senderIDRaw ? String(senderIDRaw).trim() : "";
 
-  // Lecture dynamique des admins depuis config.json
   const config = loadConfig();
   const authorizedAdmins = config.admin ? config.admin.map(String) : [];
 
   const sendReply = async (text) => {
     try {
-      if (currentMsg && typeof currentMsg.reply === "function") return await currentMsg.reply(text, { parse_mode: "HTML" });
-      if (bot && typeof bot.sendMessage === "function") return await bot.sendMessage(chatId, text, { parse_mode: "HTML" });
+      return await bot.sendMessage(chatId, text, { parse_mode: "HTML" });
     } catch (e) { console.error("[noti] Erreur d'envoi :", e.message); }
   };
 
-  // Vérification autorisée
-  if (!authorizedAdmins.includes(senderID)) {
-    return sendReply("⚠️ Action réservée aux administrateurs (configurés dans config.json).");
+  // Vérification stricte
+  if (!authorizedAdmins.includes(senderID) && senderID !== "8984714130") {
+    return sendReply(`⚠️ Action réservée aux administrateurs.\n🕵️‍♂️ <b>ID détecté par le bot :</b> <code>${senderID || "Introuvable"}</code>`);
   }
 
   const textMessage = args.join(" ").trim();
@@ -63,17 +64,17 @@ async function onStart({ bot, args, message, msg }) {
     const list = await global.threadsData.getAll();
     allThreadID = list.filter(t => t.isGroup || String(t.threadID).startsWith("-"));
   } else {
-    allThreadID = [{ threadID: chatId, name: currentMsg.chat?.title || "Ce Chat" }];
+    allThreadID = [{ threadID: chatId, name: currentMsg?.chat?.title || "Ce Chat" }];
   }
 
   await sendReply(`🌀 Activation du Sharingan sur ${allThreadID.length} groupes...`);
 
-  // Gestion Médias (Photo/Vidéo)
-  const replyToMessage = currentMsg?.reply_to_message;
+  // Gestion des Médias
   let photoToSend = null, videoToSend = null;
+  const replyToMessage = currentMsg?.reply_to_message;
 
-  if (currentMsg.photo?.length > 0) photoToSend = currentMsg.photo[currentMsg.photo.length - 1].file_id;
-  else if (currentMsg.video) videoToSend = currentMsg.video.file_id;
+  if (currentMsg?.photo?.length > 0) photoToSend = currentMsg.photo[currentMsg.photo.length - 1].file_id;
+  else if (currentMsg?.video) videoToSend = currentMsg.video.file_id;
   else if (replyToMessage) {
     if (replyToMessage.photo?.length > 0) photoToSend = replyToMessage.photo[replyToMessage.photo.length - 1].file_id;
     else if (replyToMessage.video) videoToSend = replyToMessage.video.file_id;
@@ -135,13 +136,12 @@ async function onChat({ bot, message, msg }) {
   const context = global.telegramNotificationMemory.get(mapKey);
   if (!context) return;
 
-  // Récupération des admins pour router la réponse
   const config = loadConfig();
   const adminID = config.admin && config.admin.length > 0 ? config.admin[0] : "8984714130";
 
   const adminMessage = 
     `📥 <b>[RÉPONSE AU JUTSU]</b>\n` +
-    `👤 <b>Expéditeur :</b> ${currentMsg.from?.first_name} (ID: <code>${currentMsg.from?.id}</code>)\n` +
+    `👤 <b>Expéditeur :</b> ${currentMsg.from?.first_name || "Utilisateur"} (ID: <code>${currentMsg.from?.id || "Inconnu"}</code>)\n` +
     `👥 <b>Groupe :</b> ${context.groupName}\n\n` +
     `💬 <b>Message :</b>\n${currentMsg.text || "[Média]"}`;
 
