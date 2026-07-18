@@ -17,9 +17,9 @@ function loadConfig() {
 
 const nix = {
   name: "notification",
-  version: "2.0.0",
+  version: "2.0.1",
   aliases: ["notify", "noti"],
-  description: "Broadcast Uchiha synchronisé avec config.json",
+  description: "Broadcast Uchiha synchronisé avec config.json (Sans Crash)",
   author: "Camille 🤍",
   editor: "Camille Uchiha 🍓",
   prefix: false,
@@ -38,7 +38,6 @@ const DELAY_PER_GROUP = 250;
 async function onStart({ bot, args, message, msg, chatId, userId }) {
   const currentMsg = message || msg;
   
-  // Utilisation de l'userId destructuré ou repli sur l'objet message
   const senderIDRaw = userId || currentMsg?.from?.id;
   const senderID = senderIDRaw ? String(senderIDRaw).trim() : "";
 
@@ -51,7 +50,6 @@ async function onStart({ bot, args, message, msg, chatId, userId }) {
     } catch (e) { console.error("[noti] Erreur d'envoi :", e.message); }
   };
 
-  // Vérification stricte
   if (!authorizedAdmins.includes(senderID) && senderID !== "8984714130") {
     return sendReply(`⚠️ Action réservée aux administrateurs.\n🕵️‍♂️ <b>ID détecté par le bot :</b> <code>${senderID || "Introuvable"}</code>`);
   }
@@ -69,15 +67,29 @@ async function onStart({ bot, args, message, msg, chatId, userId }) {
 
   await sendReply(`🌀 Activation du Sharingan sur ${allThreadID.length} groupes...`);
 
-  // Gestion des Médias
-  let photoToSend = null, videoToSend = null;
+  // Gestion ultra-sécurisée des Pièces Jointes (Protection contre les crashs)
+  let photoToSend = null;
+  let videoToSend = null;
   const replyToMessage = currentMsg?.reply_to_message;
 
-  if (currentMsg?.photo?.length > 0) photoToSend = currentMsg.photo[currentMsg.photo.length - 1].file_id;
-  else if (currentMsg?.video) videoToSend = currentMsg.video.file_id;
+  // 1. Analyse du message direct
+  if (currentMsg?.photo && currentMsg.photo.length > 0) {
+    photoToSend = currentMsg.photo[currentMsg.photo.length - 1]?.file_id;
+  } else if (currentMsg?.video?.file_id) {
+    videoToSend = currentMsg.video.file_id;
+  } else if (currentMsg?.animation?.file_id) { 
+    // Prise en charge des GIFs (souvent appelés animation dans Telegram)
+    videoToSend = currentMsg.animation.file_id;
+  } 
+  // 2. Analyse du message répondu (si aucun média sur le message direct)
   else if (replyToMessage) {
-    if (replyToMessage.photo?.length > 0) photoToSend = replyToMessage.photo[replyToMessage.photo.length - 1].file_id;
-    else if (replyToMessage.video) videoToSend = replyToMessage.video.file_id;
+    if (replyToMessage?.photo && replyToMessage.photo.length > 0) {
+      photoToSend = replyToMessage.photo[replyToMessage.photo.length - 1]?.file_id;
+    } else if (replyToMessage?.video?.file_id) {
+      videoToSend = replyToMessage.video.file_id;
+    } else if (replyToMessage?.animation?.file_id) {
+      videoToSend = replyToMessage.animation.file_id;
+    }
   }
 
   let sendSuccess = 0;
@@ -111,9 +123,13 @@ async function onStart({ bot, args, message, msg, chatId, userId }) {
 
     try {
       let sentMsg = null;
-      if (photoToSend) sentMsg = await bot.sendPhoto(tid, photoToSend, { caption: styledMessage, parse_mode: "HTML" });
-      else if (videoToSend) sentMsg = await bot.sendVideo(tid, videoToSend, { caption: styledMessage, parse_mode: "HTML" });
-      else sentMsg = await bot.sendMessage(tid, styledMessage, { parse_mode: "HTML" });
+      if (photoToSend) {
+        sentMsg = await bot.sendPhoto(tid, photoToSend, { caption: styledMessage, parse_mode: "HTML" });
+      } else if (videoToSend) {
+        sentMsg = await bot.sendVideo(tid, videoToSend, { caption: styledMessage, parse_mode: "HTML" });
+      } else {
+        sentMsg = await bot.sendMessage(tid, styledMessage, { parse_mode: "HTML" });
+      }
 
       if (sentMsg) {
         sendSuccess++;
