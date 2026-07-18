@@ -19,14 +19,18 @@ if (!global.telegramNotificationMemory) {
   global.telegramNotificationMemory = new Map();
 }
 
-// Identifiant Telegram unique de Camille Uchiha
-const ADMIN_IDS = ["8984714130"];
-const DELAY_PER_GROUP = 250; // Délai anti-flood par défaut
+// Identifiant Telegram unique de Camille Uchiha (accepté en String et Number)
+const ADMIN_IDS = ["8984714130", 8984714130];
+const DELAY_PER_GROUP = 250; 
 
 async function onStart({ bot, args, message, msg }) {
   const currentMsg = message || msg;
   const chatId = currentMsg?.chat?.id;
-  const senderID = currentMsg?.from?.id ? String(currentMsg.from.id) : "";
+  
+  // Extraction sécurisée de l'ID depuis toutes les structures possibles de l'événement Telegram
+  const rawSenderID = currentMsg?.from?.id || currentMsg?.sender?.id || currentMsg?.userId;
+  const senderIDStr = rawSenderID ? String(rawSenderID).trim() : "";
+  const senderIDNum = rawSenderID ? Number(rawSenderID) : 0;
 
   const sendReply = async (text) => {
     try {
@@ -39,9 +43,9 @@ async function onStart({ bot, args, message, msg }) {
     } catch (e) { console.error("[noti] Erreur d'envoi :", e.message); }
   };
 
-  // 1. Vérification Admin du Bot
-  if (!senderID || !ADMIN_IDS.includes(senderID)) {
-    return sendReply("⚠️ Action réservée à l'administrateur système.");
+  // 1. Vérification Admin ultra-sécurisée (vérifie le tableau de chaînes et de nombres)
+  if (!ADMIN_IDS.includes(senderIDStr) && !ADMIN_IDS.includes(senderIDNum)) {
+    return sendReply(`⚠️ Action réservée à l'administrateur système. (ID détecté: <code>${rawSenderID || "Inconnu"}</code>)`);
   }
 
   // 2. Extraction du message
@@ -56,7 +60,7 @@ async function onStart({ bot, args, message, msg }) {
     const list = await global.threadsData.getAll();
     allThreadID = list.filter(t => t.isGroup || String(t.threadID).startsWith("-"));
   } else {
-    allThreadID = [{ threadID: chatId, name: currentMsg.chat.title || "Ce Chat" }];
+    allThreadID = [{ threadID: chatId, name: currentMsg.chat?.title || "Ce Chat" }];
   }
 
   if (!allThreadID.length) return sendReply("❌ [SYSTEM] INFO: Aucun groupe cible disponible.");
@@ -64,7 +68,6 @@ async function onStart({ bot, args, message, msg }) {
   await sendReply(`🌀 Activation du Sharingan sur ${allThreadID.length} groupes...`);
 
   // 4. Gestion des pièces jointes (Photo / Vidéo) sur Telegram
-  // On regarde si le message actuel ou le message répondu contient un média
   const replyToMessage = currentMsg?.reply_to_message;
   let photoToSend = null;
   let videoToSend = null;
@@ -90,13 +93,11 @@ async function onStart({ bot, args, message, msg }) {
     let threadName = thread.name || "Groupe Inconnu";
     const time = moment.tz("Africa/Abidjan").format("HH:mm");
 
-    // Récupération en temps réel des infos fraîches du groupe Telegram si possible
     try {
       const chatDetails = await bot.getChat(tid);
       threadName = chatDetails.title || threadName;
     } catch {}
 
-    // Design Sasuke Uchiha adapté au format HTML Telegram
     const styledMessage = 
 `╔═══════ 🍎 ═══════╗
    ⚡ <b>NOTIFICATION</b> ⚡
@@ -118,7 +119,6 @@ async function onStart({ bot, args, message, msg }) {
     try {
       let sentMsg = null;
 
-      // Envoi selon la présence d'un média ou non
       if (photoToSend) {
         sentMsg = await bot.sendPhoto(tid, photoToSend, { caption: styledMessage, parse_mode: "HTML" });
       } else if (videoToSend) {
@@ -129,21 +129,19 @@ async function onStart({ bot, args, message, msg }) {
 
       if (sentMsg) {
         sendSuccess++;
-        // Liaison de l'ID du message pour attraper les réponses plus tard (onChat)
         global.telegramNotificationMemory.set(String(sentMsg.message_id) + "_" + String(tid), {
           groupName: threadName,
           threadID: tid
         });
       }
 
-      // Délai anti-flood régulé
       await new Promise(resolve => setTimeout(resolve, DELAY_PER_GROUP));
     } catch (e) {
       sendError.push(threadName || tid);
     }
   }
 
-  // 6. Rapport final à Camille
+  // 6. Rapport final
   let msgBilan = `✅ Transmis avec succès à ${sendSuccess} groupes.`;
   if (sendError.length > 0) {
     msgBilan += `\n❌ Échec sur ${sendError.length} groupes.`;
@@ -151,7 +149,6 @@ async function onStart({ bot, args, message, msg }) {
   return sendReply(msgBilan);
 }
 
-// Gestionnaire de réponses automatique (Intercepteur onChat)
 async function onChat({ bot, message, msg }) {
   const currentMsg = message || msg;
   const replyToMessage = currentMsg?.reply_to_message;
@@ -166,8 +163,8 @@ async function onChat({ bot, message, msg }) {
 
   if (!context) return;
 
-  const userName = (currentMsg.from.first_name || "") + (currentMsg.from.last_name ? " " + currentMsg.from.last_name : "") || "Utilisateur";
-  const userID = currentMsg.from.id;
+  const userName = (currentMsg.from?.first_name || "") + (currentMsg.from?.last_name ? " " + currentMsg.from.last_name : "") || "Utilisateur";
+  const userID = currentMsg.from?.id || "Inconnu";
 
   const adminMessage = 
     `📥 <b>[RÉPONSE AU JUTSU]</b>\n` +
