@@ -1,16 +1,18 @@
+const fs = require("fs");
+const path = require("path");
 const axios = require("axios");
 
 const nix = {
   name: "pastebin",
-  version: "1.1.0",
-  aliases: ["paste"],
-  description: "Téléverse du texte ou du code sur un Pastebin public stable",
-  author: "Camille Uchiha",
+  version: "1.2.0",
+  aliases: ["bin"],
+  description: "Téléverse le code d'une commande du bot et génère un lien brut",
+  author: "ArYAN x Camille Uchiha",
   prefix: true,
   category: "utility",
   type: "anyone",
   cooldown: 5,
-  guide: "{pn} [texte] ou en répondant à un message"
+  guide: "{pn} [nom_du_fichier] (ex: {pn} mini)"
 };
 
 async function onStart({ bot, args, message, msg, usages }) {
@@ -23,59 +25,74 @@ async function onStart({ bot, args, message, msg, usages }) {
         if (chatId) return await bot.sendMessage(chatId, text);
       }
     } catch (e) {
-      console.error("[pastebin] Erreur d'envoi :", e.message);
+      console.error("[pastebin-file] Erreur d'envoi Telegram :", e.message);
     }
   };
 
-  let textToPaste = args.join(" ").trim();
-
-  // Vérification si c'est un Reply
-  const replyToMessage = message?.reply_to_message || msg?.reply_to_message;
-  if (!textToPaste && replyToMessage && replyToMessage.text) {
-    textToPaste = replyToMessage.text;
+  if (args.length === 0) {
+    return sendReply("⚠️ Spécifie le nom du fichier de commande à téléverser. Exemple : `/pastebin mini`.");
   }
 
-  if (!textToPaste) {
-    return sendReply("❌ | Écris du texte après la commande ou réponds à un message contenant le texte à téléverser.");
+  const fileName = args[0];
+  
+  // Résolution du chemin vers ton dossier de commandes actuel
+  const filePathWithoutExtension = path.join(__dirname, fileName);
+  const filePathWithExtension = path.join(__dirname, fileName + ".js");
+
+  let filePath = null;
+  if (fs.existsSync(filePathWithoutExtension) && fs.statSync(filePathWithoutExtension).isFile()) {
+    filePath = filePathWithoutExtension;
+  } else if (fs.existsSync(filePathWithExtension)) {
+    filePath = filePathWithExtension;
   }
 
-  let pasteUrl = null;
+  if (!filePath) {
+    return sendReply("❌ Fichier ou commande introuvable dans le dossier.");
+  }
 
-  // --- TENTATIVE 1 : paste.c-net.org ---
   try {
-    const res = await axios.post("https://paste.c-net.org", textToPaste, {
-      headers: { "Content-Type": "text/plain" },
-      timeout: 8000
-    });
-    if (res.data && String(res.data).startsWith("http")) {
-      pasteUrl = res.data.trim();
-    }
-  } catch (err) {
-    console.log("[pastebin] Échec du premier serveur, tentative avec le secours...");
-  }
+    const fileData = fs.readFileSync(filePath, "utf8");
+    let pasteUrl = null;
 
-  // --- TENTATIVE 2 : Secours (ix.io) ---
-  if (!pasteUrl) {
+    // --- TENTATIVE 1 : Serveur Principal ---
     try {
-      const params = new URLSearchParams();
-      params.append("f:1", textToPaste);
-      const resFallback = await axios.post("http://ix.io", params, { timeout: 8000 });
-      if (resFallback.data && String(resFallback.data).startsWith("http")) {
-        pasteUrl = resFallback.data.trim();
+      const res = await axios.post("https://paste.c-net.org", fileData, {
+        headers: { "Content-Type": "text/plain" },
+        timeout: 8000
+      });
+      if (res.data && String(res.data).startsWith("http")) {
+        pasteUrl = res.data.trim();
       }
-    } catch (fallbackErr) {
-      console.error("[pastebin] Échec du serveur de secours :", fallbackErr.message);
+    } catch (err) {
+      console.log("[pastebin-file] Échec du premier serveur, bascule sur le secours...");
     }
+
+    // --- TENTATIVE 2 : Serveur Secours ---
+    if (!pasteUrl) {
+      try {
+        const params = new URLSearchParams();
+        params.append("f:1", fileData);
+        const resFallback = await axios.post("http://ix.io", params, { timeout: 8000 });
+        if (resFallback.data && String(resFallback.data).startsWith("http")) {
+          pasteUrl = resFallback.data.trim();
+        }
+      } catch (fallbackErr) {
+        console.error("[pastebin-file] Échec du secours :", fallbackErr.message);
+      }
+    }
+
+    if (!pasteUrl) {
+      return sendReply("❌ Impossible d'héberger le fichier pour le moment. Réessaye plus tard.");
+    }
+
+    const responseContent = `📋 ✦ 𝗖𝗢𝗗𝗘 𝗧𝗘𝗟𝗘𝗩𝗘𝗥𝗦𝗘 ✦ 📋\n━━━━━━━━━━━━━━\n✓ | Fichier [ ${path.basename(filePath)} ] chargé.\n\n🔗 𝗟𝗶𝗲𝗻 𝗕𝗿𝘂𝘁 (𝗥𝗮𝘄) :\n${pasteUrl}\n━━━━━━━━━━━━━━\n⚡ 𝗘𝗱𝗶𝘁𝗲𝘂𝗿 : 𝗖𝗮𝗺𝗶𝗹𝗹𝗲 𝗨𝗰𝗵𝗶𝗵𝗮`;
+
+    return sendReply(responseContent);
+
+  } catch (err) {
+    console.error(err);
+    return sendReply("⚠️ Une erreur est survenue lors de la lecture ou de l'envoi du fichier.");
   }
-
-  // Si les deux serveurs ont échoué
-  if (!pasteUrl) {
-    return sendReply("❌ | Les serveurs d'hébergement sont saturés pour le moment. Réessaye dans quelques instants.");
-  }
-
-  const responseContent = `📋 ✦ 𝗣𝗔𝗦𝗧𝗘𝗕𝗜𝗡 ✦ 📋\n━━━━━━━━━━━━━━\n✓ | Texte téléversé avec succès !\n\n🔗 𝗟𝗶𝗲𝗻 𝗕𝗿𝘂𝘁 (𝗥𝗮𝘄) :\n${pasteUrl}\n━━━━━━━━━━━━━━\n⚡ 𝗘𝗱𝗶𝘁𝗲𝘂𝗿 : 𝗖𝗮𝗺𝗶𝗹𝗹𝗲 𝗨𝗰𝗵𝗶𝗵𝗮`;
-
-  return sendReply(responseContent);
 }
 
 module.exports = { nix, onStart };
