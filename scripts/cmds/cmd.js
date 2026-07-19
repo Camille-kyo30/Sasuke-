@@ -2,91 +2,101 @@ const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
 
+const cmdFolder = __dirname;
 const configPath = path.join(__dirname, '..', '..', 'config.json');
 
 function loadConfig() {
-  try {
-    const configData = fs.readFileSync(configPath, 'utf-8');
-    const config = JSON.parse(configData);
-    if (!config.admin) config.admin = [];
-    return config;
-  } catch (error) {
-    return { admin: [] };
-  }
+    try { return JSON.parse(fs.readFileSync(configPath, 'utf-8')); }
+    catch (e) { return { admin: [] }; }
 }
 
-module.exports = {
-  nix: {
-    name: 'cmd',
-    author: 'ArYAN',
-    version: '0.0.2',
-    description: 'Gestion avancée des commandes (Install via message ou URL)',
-    usage: 'cmd <install|loadall|load|unload|reload> [args]',
-    admin: true,
-    category: 'Admin',
-    prefix: false,
-    aliases: ['cm']
-  },
+const nix = {
+  name: "cmd",
+  version: "0.0.5",
+  aliases: ["cm"],             
+  description: "Gestion avancée des commandes",         
+  author: "Camille Uchiha",             
+  prefix: true,         
+  category: "Admin",           
+  type: "admin",         
+  cooldown: 0,            
+  guide: "/cmd <install|loadall|unload|reload> [name]"  
+};
 
-  async onStart({ message, args, userId }) {
+async function onStart({ message, args, userId }) {
     const config = loadConfig();
-    if (!config.admin.includes(String(userId))) {
-      return message.reply("❌ | Accès réservé aux administrateurs.");
-    }
+    if (!config.admin.includes(String(userId))) return message.reply("❌ Accès refusé.");
 
     const subcmd = args[0]?.toLowerCase();
-    const cmdFolder = __dirname;
-    const commands = global.teamnix?.cmds || new Map();
+    const cmdName = args[1];
+    if (!global.teamnix) global.teamnix = { cmds: new Map() };
+    const commands = global.teamnix.cmds;
 
-    function clearRequireCache(filePath) {
-      const resolvedPath = require.resolve(filePath);
-      delete require.cache[resolvedPath];
+    switch (subcmd) {
+        case 'install': {
+            if (!cmdName || !cmdName.endsWith('.js')) return message.reply('Usage: /cmd install name.js');
+            const code = message.messageReply?.body || (args[2] ? (await axios.get(args[2])).data : null);
+            if (!code) return message.reply('❌ Aucun code détecté.');
+            
+            const filePath = path.join(cmdFolder, cmdName);
+            fs.writeFileSync(filePath, code, 'utf-8');
+            
+            try {
+                delete require.cache[require.resolve(filePath)];
+                const cmd = require(filePath);
+                if (cmd.nix && cmd.nix.name) {
+                    commands.set(cmd.nix.name.toLowerCase(), cmd);
+                    message.reply(`✅ Installé et chargé: ${cmd.nix.name}`);
+                }
+            } catch (e) { message.reply(`❌ Erreur: ${e.message}`); }
+            break;
+        }
+
+        case 'reload': {
+            const filePath = path.join(cmdFolder, `${cmdName}.js`);
+            if (!fs.existsSync(filePath)) return message.reply('❌ Fichier introuvable.');
+            try {
+                delete require.cache[require.resolve(filePath)];
+                const cmd = require(filePath);
+                if (cmd.nix && cmd.nix.name) {
+                    commands.set(cmd.nix.name.toLowerCase(), cmd);
+                    message.reply(`✅ Commande ${cmd.nix.name} rechargée.`);
+                }
+            } catch (e) { message.reply(`❌ Erreur: ${e.message}`); }
+            break;
+        }
+
+        case 'loadall': {
+            const files = fs.readdirSync(cmdFolder).filter(f => f.endsWith('.js') && f !== 'cmd.js');
+            let count = 0;
+            for (const file of files) {
+                try {
+                    const filePath = path.join(cmdFolder, file);
+                    delete require.cache[require.resolve(filePath)];
+                    const cmd = require(filePath);
+                    if (cmd.nix && cmd.nix.name) {
+                        commands.set(cmd.nix.name.toLowerCase(), cmd);
+                        count++;
+                    }
+                } catch (e) { continue; }
+            }
+            message.reply(`✅ ${count} commandes chargées.`);
+            break;
+        }
+        
+        case 'unload': {
+            if (commands.has(cmdName)) {
+                commands.delete(cmdName);
+                message.reply(`✅ Commande ${cmdName} déchargée.`);
+            } else {
+                message.reply('❌ Commande introuvable.');
+            }
+            break;
+        }
+
+        default:
+            message.reply('Options: install, loadall, unload, reload');
     }
+}
 
-    function registerCommand(cmd, commandsCollection) {
-      if (!cmd || !cmd.nix?.name || typeof cmd.onStart !== 'function') return false;
-      commandsCollection.set(cmd.nix.name.toLowerCase(), cmd);
-      return true;
-    }
-
-    // --- INSTALLATION ---
-    if (subcmd === 'install') {
-      const fileName = args[1];
-      if (!fileName?.endsWith('.js')) return message.reply('● Usage: `/cmd install nom.js` (Réponds au message contenant le code)');
-
-      let code;
-      // Cas 1: Réponse à un message contenant le code
-      if (message.messageReply?.body) {
-        code = message.messageReply.body;
-      } 
-      // Cas 2: URL fournie en argument
-      else if (args[2]) {
-        try {
-          const res = await axios.get(args[2]);
-          code = res.data;
-        } catch (e) { return message.reply(`❌ Erreur URL: ${e.message}`); }
-      } else {
-        return message.reply('❌ | Veuillez répondre au message contenant le code ou fournir une URL.');
-      }
-
-      const filePath = path.join(cmdFolder, fileName);
-      fs.writeFileSync(filePath, code, 'utf-8');
-      
-      try {
-        clearRequireCache(filePath);
-        const loaded = require(filePath);
-        registerCommand(loaded, commands);
-        return message.reply(`✅ | Commande "${loaded.nix.name}" installée et chargée !`);
-      } catch (err) {
-        return message.reply(`❌ Erreur de chargement: ${err.message}`);
-      }
-    }
-
-    // --- AUTRES COMMANDES (loadall, unload, reload) ---
-    // ... (Le reste de tes fonctions loadall/unload/reload restent identiques) ...
-    
-    else {
-      message.reply('❌ Unknown subcommand. Utilisez install, loadall, unload, load, ou reload.');
-    }
-  }
-};
+module.exports = { nix, onStart };
