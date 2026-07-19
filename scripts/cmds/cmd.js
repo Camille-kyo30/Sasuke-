@@ -12,7 +12,7 @@ function loadConfig() {
 
 const nix = {
   name: "cmd",
-  version: "0.0.5",
+  version: "0.0.6",
   aliases: ["cm"],             
   description: "Gestion avancée des commandes",         
   author: "Camille Uchiha",             
@@ -29,14 +29,20 @@ async function onStart({ message, args, userId }) {
 
     const subcmd = args[0]?.toLowerCase();
     const cmdName = args[1];
+    
+    // Initialisation sécurité
     if (!global.teamnix) global.teamnix = { cmds: new Map() };
     const commands = global.teamnix.cmds;
 
     switch (subcmd) {
         case 'install': {
             if (!cmdName || !cmdName.endsWith('.js')) return message.reply('Usage: /cmd install name.js');
-            const code = message.messageReply?.body || (args[2] ? (await axios.get(args[2])).data : null);
-            if (!code) return message.reply('❌ Aucun code détecté.');
+            
+            // CORRECTION : On vérifie .text, .caption, et .body pour être sûr
+            const msgReply = message.messageReply;
+            const code = msgReply?.text || msgReply?.caption || msgReply?.body || (args[2] ? (await axios.get(args[2]).catch(() => ({data: null}))).data : null);
+            
+            if (!code) return message.reply('❌ Aucun code détecté. Réponds bien au message contenant le code.');
             
             const filePath = path.join(cmdFolder, cmdName);
             fs.writeFileSync(filePath, code, 'utf-8');
@@ -48,7 +54,7 @@ async function onStart({ message, args, userId }) {
                     commands.set(cmd.nix.name.toLowerCase(), cmd);
                     message.reply(`✅ Installé et chargé: ${cmd.nix.name}`);
                 }
-            } catch (e) { message.reply(`❌ Erreur: ${e.message}`); }
+            } catch (e) { message.reply(`❌ Erreur de chargement: ${e.message}`); }
             break;
         }
 
@@ -100,3 +106,4 @@ async function onStart({ message, args, userId }) {
 }
 
 module.exports = { nix, onStart };
+
