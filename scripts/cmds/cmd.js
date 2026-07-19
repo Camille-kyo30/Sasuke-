@@ -11,7 +11,7 @@ function loadConfig() {
 
 const nix = {
   name: "cmd",
-  version: "0.0.8",
+  version: "0.1.0",
   aliases: ["cm"],
   description: "Gestion des commandes",
   author: "Camille Uchiha",
@@ -24,7 +24,11 @@ const nix = {
 
 async function onStart({ message, args, userId, bot }) {
     const config = loadConfig();
-    if (!config.admin.includes(String(userId))) return message.reply("❌ Accès réservé aux admins.");
+    const chatId = message.chat?.id || message.chatId;
+
+    if (!config.admin.includes(String(userId))) {
+        return message.reply("❌ Accès réservé aux admins.");
+    }
 
     if (!global.teamnix) global.teamnix = { cmds: new Map() };
     const commands = global.teamnix.cmds;
@@ -34,21 +38,23 @@ async function onStart({ message, args, userId, bot }) {
     switch (subcmd) {
         case 'install': {
             if (!cmdName || !cmdName.endsWith('.js')) return message.reply('Usage: /cmd install name.js');
-            const targetMsg = message.messageReply || message.reply_to_message;
-            const code = targetMsg?.text || targetMsg?.caption;
+            
+            const target = message.messageReply || message.reply_to_message;
+            const code = target?.text || target?.caption || target?.body || target?.message?.text || target?.message?.caption;
+            
             if (!code) return message.reply('❌ Aucun code détecté dans le message répondu.');
             
             const filePath = path.join(cmdFolder, path.basename(cmdName));
-            fs.writeFileSync(filePath, code, 'utf-8');
-            
             try {
+                fs.writeFileSync(filePath, code, 'utf-8');
                 if (require.cache[require.resolve(filePath)]) delete require.cache[require.resolve(filePath)];
+                
                 const cmd = require(filePath);
                 if (cmd.nix?.name) {
                     commands.set(cmd.nix.name.toLowerCase(), cmd);
                     message.reply(`✅ Installé et chargé: ${cmd.nix.name}`);
                 } else {
-                    message.reply('❌ Erreur: Structure nix manquante.');
+                    message.reply('❌ Erreur: Structure "nix" manquante dans le fichier.');
                 }
             } catch (e) { message.reply(`❌ Erreur: ${e.message}`); }
             break;
@@ -94,7 +100,7 @@ async function onStart({ message, args, userId, bot }) {
         }
 
         default:
-            message.reply('Commandes disponibles: install, reload, loadall, unload');
+            bot.sendMessage(chatId, 'Commandes disponibles : install, reload, loadall, unload');
     }
 }
 
