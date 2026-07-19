@@ -1,6 +1,5 @@
 const fs = require('fs');
 const path = require('path');
-const axios = require('axios');
 
 const cmdFolder = __dirname;
 const configPath = path.join(__dirname, '..', '..', 'config.json');
@@ -12,59 +11,63 @@ function loadConfig() {
 
 const nix = {
   name: "cmd",
-  version: "0.0.7",
-  aliases: ["cm"],             
-  description: "Gestion des commandes",         
-  author: "Camille Uchiha",             
-  prefix: true,         
-  category: "Admin",           
-  type: "admin",         
-  cooldown: 0,            
-  guide: "/cmd <install|loadall|unload|reload> [name]"  
+  version: "0.0.8",
+  aliases: ["cm"],
+  description: "Gestion des commandes",
+  author: "Camille Uchiha",
+  prefix: true,
+  category: "Admin",
+  type: "admin",
+  cooldown: 0,
+  guide: "/cmd <install|loadall|unload|reload> [name]"
 };
 
-async function onStart({ message, args, userId }) {
+async function onStart({ message, args, userId, bot }) {
     const config = loadConfig();
     if (!config.admin.includes(String(userId))) return message.reply("❌ Accès réservé aux admins.");
 
-    const subcmd = args[0]?.toLowerCase();
-    const cmdName = args[1];
-    
-    // Assure l'existence du registre global
     if (!global.teamnix) global.teamnix = { cmds: new Map() };
     const commands = global.teamnix.cmds;
+    const subcmd = args[0]?.toLowerCase();
+    const cmdName = args[1];
 
     switch (subcmd) {
         case 'install': {
             if (!cmdName || !cmdName.endsWith('.js')) return message.reply('Usage: /cmd install name.js');
-            
-            // Correction ici : récupère le contenu du message auquel on répond
             const targetMsg = message.messageReply || message.reply_to_message;
-            const code = targetMsg?.text || targetMsg?.caption || targetMsg?.body;
-            
+            const code = targetMsg?.text || targetMsg?.caption;
             if (!code) return message.reply('❌ Aucun code détecté dans le message répondu.');
             
-            const filePath = path.join(cmdFolder, cmdName);
+            const filePath = path.join(cmdFolder, path.basename(cmdName));
             fs.writeFileSync(filePath, code, 'utf-8');
             
             try {
-                delete require.cache[require.resolve(filePath)];
+                if (require.cache[require.resolve(filePath)]) delete require.cache[require.resolve(filePath)];
                 const cmd = require(filePath);
-                if (cmd.nix && cmd.nix.name) {
+                if (cmd.nix?.name) {
                     commands.set(cmd.nix.name.toLowerCase(), cmd);
                     message.reply(`✅ Installé et chargé: ${cmd.nix.name}`);
                 } else {
-                    message.reply('❌ Erreur: Structure nix manquante dans le fichier.');
+                    message.reply('❌ Erreur: Structure nix manquante.');
                 }
             } catch (e) { message.reply(`❌ Erreur: ${e.message}`); }
             break;
         }
 
+        case 'unload': {
+            if (!cmdName) return message.reply('Usage: /cmd unload <name>');
+            if (!commands.has(cmdName.toLowerCase())) return message.reply('❌ Commande introuvable.');
+            commands.delete(cmdName.toLowerCase());
+            message.reply(`✅ Commande ${cmdName} déchargée.`);
+            break;
+        }
+
         case 'reload': {
-            const filePath = path.join(cmdFolder, `${cmdName}.js`);
+            if (!cmdName) return message.reply('Usage: /cmd reload <name>');
+            const filePath = path.join(cmdFolder, `${path.basename(cmdName)}.js`);
             if (!fs.existsSync(filePath)) return message.reply('❌ Fichier introuvable.');
             try {
-                delete require.cache[require.resolve(filePath)];
+                if (require.cache[require.resolve(filePath)]) delete require.cache[require.resolve(filePath)];
                 const cmd = require(filePath);
                 commands.set(cmd.nix.name.toLowerCase(), cmd);
                 message.reply(`✅ Commande ${cmd.nix.name} rechargée.`);
@@ -78,9 +81,9 @@ async function onStart({ message, args, userId }) {
             for (const file of files) {
                 try {
                     const filePath = path.join(cmdFolder, file);
-                    delete require.cache[require.resolve(filePath)];
+                    if (require.cache[require.resolve(filePath)]) delete require.cache[require.resolve(filePath)];
                     const cmd = require(filePath);
-                    if (cmd.nix && cmd.nix.name) {
+                    if (cmd.nix?.name) {
                         commands.set(cmd.nix.name.toLowerCase(), cmd);
                         count++;
                     }
@@ -91,7 +94,7 @@ async function onStart({ message, args, userId }) {
         }
 
         default:
-            message.reply('Commandes: install, reload, loadall, unload');
+            message.reply('Commandes disponibles: install, reload, loadall, unload');
     }
 }
 
