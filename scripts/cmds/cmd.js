@@ -14,15 +14,17 @@ const nix = {
   guide: "{pn} load <nom> | {pn} loadAll"  
 };
 
-async function onStart({ bot, args, message, msg, chatId, userId }) {
+async function onStart({ bot, args, message, msg, chatId }) {
   const currentMsg = message || msg;
   
-  // Vérification de sécurité pour global.utils
-  if (!global.utils) {
-    return bot.sendMessage(chatId, "❌ Erreur critique : global.utils n'est pas initialisé.");
+  // Correction : On cible global.GoatBot.utils au lieu de global.utils
+  const utils = global.GoatBot?.utils || global.utils;
+  
+  if (!utils) {
+    return bot.sendMessage(chatId, "❌ Erreur : Les outils du bot ne sont pas accessibles.");
   }
 
-  const { loadScripts } = global.utils;
+  const { loadScripts } = utils;
   const action = args[0];
 
   if (action === "load") {
@@ -30,8 +32,8 @@ async function onStart({ bot, args, message, msg, chatId, userId }) {
     if (!fileName) return bot.sendMessage(chatId, "❌ Spécifie un nom de fichier.");
     
     try {
-      const result = loadScripts("cmds", fileName, global.utils.log, global.GoatBot.configCommands, bot);
-      bot.sendMessage(chatId, result.status === "success" ? `✅ Commande "${fileName}" chargée.` : `❌ Erreur : ${result.error.message}`);
+      const result = loadScripts("cmds", fileName, utils.log, global.GoatBot.configCommands, bot);
+      bot.sendMessage(chatId, result.status === "success" ? `✅ Commande "${fileName}" chargée.` : `❌ Erreur : ${result.error?.message}`);
     } catch (e) {
       bot.sendMessage(chatId, `❌ Erreur système : ${e.message}`);
     }
@@ -43,7 +45,7 @@ async function onStart({ bot, args, message, msg, chatId, userId }) {
     
     for (const file of files) {
       const name = file.replace(".js", "");
-      const res = loadScripts("cmds", name, global.utils.log, global.GoatBot.configCommands, bot);
+      const res = loadScripts("cmds", name, utils.log, global.GoatBot.configCommands, bot);
       if (res.status === "success") successCount++;
     }
     bot.sendMessage(chatId, `✅ ${successCount} commandes rechargées.`);
