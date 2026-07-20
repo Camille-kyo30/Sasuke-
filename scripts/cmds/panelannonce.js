@@ -1,6 +1,6 @@
 const nix = {
   name: "panelannonce",
-  version: "1.1",
+  version: "1.2",
   aliases: ["annonce", "annonces"],
   description: "Panneau d'annonces pour diffuser des messages formés et urgents dans le groupe",
   author: "Camille Uchiha",
@@ -12,8 +12,13 @@ const nix = {
 };
 
 async function onStart({ bot, args, message, msg, usages }) {
-  // Récupération sécurisée du threadID (groupe ou privé) selon l'objet disponible
-  const threadID = message?.threadID || msg?.threadID || message?.chatId || msg?.chatId;
+  // Récupération sécurisée du chat ID pour Telegram
+  const chatID = message?.chat?.id || msg?.chat?.id || message?.threadID || msg?.threadID;
+
+  if (!chatID) {
+    console.error("Erreur PanelAnnonce : Impossible de récupérer le chatID.", { message, msg });
+    return;
+  }
 
   if (!args || args.length === 0) {
     const panelText = 
@@ -26,14 +31,14 @@ async function onStart({ bot, args, message, msg, usages }) {
       "  `!panelannonce urgent [texte]`\n\n" +
       "📌 *Utilisez les commandes ci-dessus pour diffuser vos informations.*";
 
-    return bot.sendMessage(panelText, threadID);
+    return bot.sendMessage(chatID, panelText, { parse_mode: "Markdown" }).catch(() => bot.sendMessage(chatID, panelText));
   }
 
   const subCommand = args[0].toLowerCase();
 
   if (subCommand === "urgent") {
     const text = args.slice(1).join(" ");
-    if (!text) return bot.sendMessage("❌ Veuillez saisir le texte de l'annonce urgente.", threadID);
+    if (!text) return bot.sendMessage(chatID, "❌ Veuillez saisir le texte de l'annonce urgente.");
 
     const urgentFormatted = 
       "🚨 ══════════════════ 🚨\n" +
@@ -42,7 +47,7 @@ async function onStart({ bot, args, message, msg, usages }) {
       text + "\n\n" +
       "⚠️ *Veuillez prendre note de cette information importante.*";
 
-    return bot.sendMessage(urgentFormatted, threadID);
+    return bot.sendMessage(chatID, urgentFormatted, { parse_mode: "Markdown" }).catch(() => bot.sendMessage(chatID, urgentFormatted));
   }
 
   const standardText = args.join(" ");
@@ -53,7 +58,7 @@ async function onStart({ bot, args, message, msg, usages }) {
     standardText + "\n\n" +
     "📌 *Diffusé par la modération.*";
 
-  return bot.sendMessage(formatted, threadID);
+  return bot.sendMessage(chatID, formatted, { parse_mode: "Markdown" }).catch(() => bot.sendMessage(chatID, formatted));
 }
 
 module.exports = { nix, onStart };
