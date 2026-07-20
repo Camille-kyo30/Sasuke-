@@ -1,13 +1,24 @@
+const Database = require("better-sqlite3"); // Assure-toi d'utiliser ton instance SQLite habituelle
+const path = require("path");
+const db = new Database(path.join(__dirname, "../database.sqlite")); // Ajuste le chemin de ta bdd si besoin
+
+// Création de la table si elle n'existe pas
+db.prepare(`
+  CREATE TABLE IF NOT EXISTS active_threads (
+    threadID TEXT PRIMARY KEY
+  )
+`).run();
+
 const nix = {
   name: "panelannonce",
-  version: "2.0",
+  version: "2.1",
   aliases: ["annonce", "annonces"],
-  description: "Diffuse une annonce ou une annonce urgente dans tous les groupes où le bot est présent",
+  description: "Diffuse une annonce dans tous les groupes enregistrés",
   author: "Camille Uchiha",
   prefix: true,
   category: "Administration",
   type: "admin",
-  cooldown: 10,
+  cooldown: 5,
   guide: "{p}panelannonce <texte> ou {p}panelannonce urgent <texte>"
 };
 
@@ -15,11 +26,21 @@ async function onStart({ bot, args, message, msg, usages }) {
   const activeMessage = message || msg;
   if (!activeMessage) return;
 
+  const chatId = activeMessage.chat?.id || activeMessage.threadID;
+
+  // Enregistrement automatique du groupe actuel dans SQLite dès qu'une commande y est tapée
+  if (chatId) {
+    try {
+      db.prepare("INSERT OR IGNORE INTO active_threads (threadID) VALUES (?)").run(String(chatId));
+    } catch (e) {
+      console.error("Erreur d'enregistrement SQLite :", e);
+    }
+  }
+
   const replyMethod = async (text) => {
     if (typeof activeMessage.reply === "function") {
       return activeMessage.reply(text);
     }
-    const chatId = activeMessage.chat?.id || activeMessage.threadID;
     if (chatId && typeof bot?.sendMessage === "function") {
       return bot.sendMessage(chatId, text);
     }
@@ -28,13 +49,12 @@ async function onStart({ bot, args, message, msg, usages }) {
   if (!args || args.length === 0) {
     const panelText = 
       "╔════════════════════╗\n" +
-      "    📢 **PANEL ANnonce GLOBAL**    \n" +
+      "    📢 **PANEL ANNONCE GLOBAL**    \n" +
       "╚════════════════════╝\n\n" +
-      "• Pour diffuser une annonce dans **tous** les groupes :\n" +
+      "• Pour diffuser une annonce dans **tous** les groupes enregistrés :\n" +
       "  `!panelannonce [votre texte]`\n\n" +
       "• Pour diffuser une annonce urgente globale :\n" +
-      "  `!panelannonce urgent [texte]`\n\n" +
-      "📌 *Attention : Le message sera envoyé simultanément dans l'ensemble des discussions du bot.*";
+      "  `!panelannonce urgent [texte]`";
 
     return replyMethod(panelText);
   }
@@ -51,10 +71,9 @@ async function onStart({ bot, args, message, msg, usages }) {
   }
 
   if (!textToSend) {
-    return replyMethod("❌ Veuillez saisir le texte à diffuser dans les groupes.");
+    return replyMethod("❌ Veuillez saisir le texte à diffuser.");
   }
 
-  // Formatage du message
   const formattedMessage = isUrgent
     ? "🚨 ══════════════════ 🚨\n" +
       "         **ANNONCE URGENTE**\n" +
@@ -67,52 +86,28 @@ async function onStart({ bot, args, message, msg, usages }) {
       textToSend + "\n\n" +
       "📌 *Diffusé par la modération.*";
 
-  await replyMethod("⏳ Diffusion de l'annonce en cours dans tous les groupes...");
+  await replyMethod("⏳ Diffusion de l'annonce en cours...");
 
-  try {
-    // Récupération de la liste des chats/groupes (méthode standard des bots Telegram / AutoResponder / structures similaires)
-    let targetChats = [];
+  // Récupération de tous les groupes stockés dans SQLite
+  const rows = db.prepare("SELECT threadID FROM active_threads").all();
 
-    if (typeof bot.getChats === "function") {
-      targetChats = await bot.getChats();
-    } else if (typeof bot.getDialogs === "function") {
-      targetChats = await bot.getDialogs();
-    } else if (bot.telegram && typeof bot.telegram.getUpdates === "function") {
-      // Fallback ou stockage interne si géré par le framework
-      targetChats = bot.chats || [];
-    }
-
-    // Si le framework stocke les IDs des groupes dans un tableau ou cache interne
-    if ((!targetChats || targetChats.length === 0) && global.client?.chats) {
-      targetChats = global.client.chats;
-    }
-
-    if (!targetChats || targetChats.length === 0) {
-      return replyMethod("❌ Impossible de récupérer la liste des groupes ou aucun groupe enregistré.");
-    }
-
-    let successCount = 0;
-    let failCount = 0;
-
-    for (const chat of targetChats) {
-      const chatId = chat.id || chat;
-      // S'assure d'envoyer uniquement dans les groupes/supergroupes/canaux ( IDs négatifs ou adaptés selon Telegram )
-      if (chatId) {
-        try {
-          await bot.sendMessage(chatId, formattedMessage);
-          successCount++;
-        } catch (err) {
-          failCount++;
-        }
-      }
-    }
-
-    return replyMethod(`✅ Diffusion terminée !\n• Succès : ${successCount}\n• Échecs : ${failCount}`);
-
-  } catch (error) {
-    console.error("Erreur lors de la diffusion globale :", error);
-    return replyMethod("❌ Une erreur est survenue lors de la diffusion globale des annonces.");
+  if (!rows || rows.length === 0) {
+    return replyMethod("❌ Aucun groupe enregistré pour le moment. Exécutez une commande dans vos groupes pour les enregistrer.");
   }
+
+  let successCount = 0;
+  let failCount = 0;
+
+  for (const row of rows) {
+    try {
+      await bot.sendMessage(row.threadID, formattedMessage);
+      successCount++;
+    } catch (err) {
+      failCount++;
+    }
+  }
+
+  return replyMethod(`✅ Diffusion terminée !\n• Succès : ${successCount}\n• Échecs : ${failCount}`);
 }
 
 module.exports = { nix, onStart };
