@@ -1,6 +1,6 @@
 const nix = {
   name: "panelannonce",
-  version: "1.0",
+  version: "1.1",
   aliases: ["annonce", "annonces"],
   description: "Panneau d'annonces pour diffuser des messages formés et urgents dans le groupe",
   author: "Camille Uchiha",
@@ -12,7 +12,8 @@ const nix = {
 };
 
 async function onStart({ bot, args, message, msg, usages }) {
-  const threadID = message.threadID || msg.threadID;
+  // Récupération sécurisée du threadID (groupe ou privé) selon l'objet disponible
+  const threadID = message?.threadID || msg?.threadID || message?.chatId || msg?.chatId;
 
   if (!args || args.length === 0) {
     const panelText = 
@@ -25,14 +26,14 @@ async function onStart({ bot, args, message, msg, usages }) {
       "  `!panelannonce urgent [texte]`\n\n" +
       "📌 *Utilisez les commandes ci-dessus pour diffuser vos informations.*";
 
-    return message.reply(panelText);
+    return bot.sendMessage(panelText, threadID);
   }
 
   const subCommand = args[0].toLowerCase();
 
   if (subCommand === "urgent") {
     const text = args.slice(1).join(" ");
-    if (!text) return message.reply("❌ Veuillez saisir le texte de l'annonce urgente.");
+    if (!text) return bot.sendMessage("❌ Veuillez saisir le texte de l'annonce urgente.", threadID);
 
     const urgentFormatted = 
       "🚨 ══════════════════ 🚨\n" +
@@ -41,7 +42,7 @@ async function onStart({ bot, args, message, msg, usages }) {
       text + "\n\n" +
       "⚠️ *Veuillez prendre note de cette information importante.*";
 
-    return message.reply(urgentFormatted);
+    return bot.sendMessage(urgentFormatted, threadID);
   }
 
   const standardText = args.join(" ");
@@ -52,7 +53,7 @@ async function onStart({ bot, args, message, msg, usages }) {
     standardText + "\n\n" +
     "📌 *Diffusé par la modération.*";
 
-  return message.reply(formatted);
+  return bot.sendMessage(formatted, threadID);
 }
 
 module.exports = { nix, onStart };
